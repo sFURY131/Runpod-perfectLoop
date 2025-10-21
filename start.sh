@@ -52,8 +52,14 @@ if [ ! -d "${COMFY_PATH}/venv" ]; then
 fi
 source "${COMFY_PATH}/venv/bin/activate"
 pip install --upgrade pip wheel
+
+echo "[*] Installing PyTorch for CUDA 12.8…"
+pip install --index-url https://download.pytorch.org/whl/cu128 \
+  torch torchvision torchaudio
+
+echo "[*] Installing ComfyUI + dependencies…"
 pip install -r "${COMFY_PATH}/requirements.txt" || true
-pip install opencv-python-headless requests
+pip install opencv-python-headless requests jupyterlab
 
 # --- NEW: Install JupyterLab into the same venv ---
 pip install jupyterlab
