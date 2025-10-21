@@ -5,25 +5,27 @@ set -euo pipefail
 DIFF_DIR="/ComfyUI/models/diffusion_models"
 TXT_DIR="/ComfyUI/models/text_encoders"
 VAE_DIR="/ComfyUI/models/vae"
+LORA_DIR="/ComfyUI/models/loras"
 
-mkdir -p "$DIFF_DIR" "$TXT_DIR" "$VAE_DIR"
+mkdir -p "$DIFF_DIR" "$TXT_DIR" "$VAE_DIR" "$LORA_DIR"
 
-# === WAN 2.2 (I2V, 14B, fp16) — YOU MUST FILL THESE TWO URLS ===
-# Put direct links that actually return the .safetensors file.
+# === WAN 2.2 (I2V, 14B, fp16) ===
 WAN22_HIGH_URL="https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"
 WAN22_LOW_URL="https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
-
-# Exact filenames your workflow expects:
 WAN22_HIGH_NAME="wan2.2_i2v_high_noise_14B_fp16.safetensors"
 WAN22_LOW_NAME="wan2.2_i2v_low_noise_14B_fp16.safetensors"
 
-# === WAN 2.1 VAE (known public link) ===
+# === WAN 2.1 VAE ===
 WAN21_VAE_URL="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors?download=true"
 WAN21_VAE_NAME="wan_2.1_vae.safetensors"
 
-# === Text encoder UMT5 (known public link) ===
+# === Text encoder UMT5 ===
 UMT5_URL="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors?download=true"
 UMT5_NAME="umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+
+# === Read Civitai-related env vars (RunPod passes these automatically) ===
+CIVITAI_TOKEN="${CIVITAI_TOKEN:-}"
+LORA_VERSION_IDS="${LORA_VERSION_IDS:-}"
 
 # --- helpers ---
 dl_as () {
@@ -52,5 +54,17 @@ dl_as "$UMT5_URL" "$TXT_DIR" "$UMT5_NAME"
 
 # 3) WAN 2.1 VAE
 dl_as "$WAN21_VAE_URL" "$VAE_DIR" "$WAN21_VAE_NAME"
+
+# 4) LoRAs from Civitai (using version IDs + token)
+if [ -n "$LORA_VERSION_IDS" ]; then
+  IFS=',' read -ra IDS <<< "$LORA_VERSION_IDS"
+  echo "[*] Downloading LoRAs from Civitai..."
+  for id in "${IDS[@]}"; do
+    url="https://civitai.com/api/download/models/${id}"
+    [ -n "$CIVITAI_TOKEN" ] && url="${url}?token=${CIVITAI_TOKEN}"
+    echo "    ↳ version ${id}"
+    aria2c -q --allow-overwrite=true --auto-file-renaming=false -d "$LORA_DIR" "$url" || true
+  done
+fi
 
 echo "[*] All required models checked."
