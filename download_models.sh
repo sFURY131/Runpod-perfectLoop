@@ -1,81 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CKPT_DIR="/ComfyUI/models/checkpoints"
+# === Where files must live (ComfyUI standard) ===
+DIFF_DIR="/ComfyUI/models/diffusion_models"
+TXT_DIR="/ComfyUI/models/text_encoders"
 VAE_DIR="/ComfyUI/models/vae"
-LORA_DIR="/ComfyUI/models/loras"
 
-CHECKPOINT_URLS=""; VAE_URLS=""; LORA_URLS=""
-CHECKPOINT_IDS=""; VAE_IDS=""; LORA_IDS=""
-CIVITAI_TOKEN=""
+mkdir -p "$DIFF_DIR" "$TXT_DIR" "$VAE_DIR"
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --checkpoints-urls) CHECKPOINT_URLS="$2"; shift 2;;
-    --vae-urls)         VAE_URLS="$2"; shift 2;;
-    --lora-urls)        LORA_URLS="$2"; shift 2;;
-    --checkpoint-ids)   CHECKPOINT_IDS="$2"; shift 2;;
-    --vae-ids)          VAE_IDS="$2"; shift 2;;
-    --lora-ids)         LORA_IDS="$2"; shift 2;;
-    --civitai-token)    CIVITAI_TOKEN="${2:-}"; shift 2;;
-    *) shift 1;;
-  esac
-done
+# === WAN 2.2 (I2V, 14B, fp16) — YOU MUST FILL THESE TWO URLS ===
+# Put direct links that actually return the .safetensors file.
+WAN22_HIGH_URL="https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors"
+WAN22_LOW_URL="https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors"
 
-dl() {
-  local url="$1" outdir="$2"
-  [ -z "$url" ] && return 0
-  mkdir -p "$outdir"
-  echo "    ↳ $url"
-  aria2c -q --allow-overwrite=true --auto-file-renaming=false -d "$outdir" "$url" || true
-}
+# Exact filenames your workflow expects:
+WAN22_HIGH_NAME="wan2.2_i2v_high_noise_14B_fp16.safetensors"
+WAN22_LOW_NAME="wan2.2_i2v_low_noise_14B_fp16.safetensors"
 
-civitai_dl() {
-  local version_id="$1" outdir="$2"
-  [ -z "$version_id" ] && return 0
-  mkdir -p "$outdir"
-  local url="https://civitai.com/api/download/models/${version_id}"
-  if [ -n "${CIVITAI_TOKEN}" ]; then
-    url="${url}?token=${CIVITAI_TOKEN}"
+# === WAN 2.1 VAE (known public link) ===
+WAN21_VAE_URL="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors?download=true"
+WAN21_VAE_NAME="wan_2.1_vae.safetensors"
+
+# === Text encoder UMT5 (known public link) ===
+UMT5_URL="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors?download=true"
+UMT5_NAME="umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+
+# --- helpers ---
+dl_as () {
+  local url="$1" dest_dir="$2" dest_name="$3"
+  [ -z "$url" ] && { echo "  [!] missing URL for $dest_name — skipping"; return 0; }
+  mkdir -p "$dest_dir"
+  if [ -f "$dest_dir/$dest_name" ]; then
+    echo "  [=] $dest_name already exists — skipping download"
+    return 0
   fi
-  echo "    ↳ civitai version ${version_id}"
-  aria2c -q --allow-overwrite=true --auto-file-renaming=false -d "$outdir" "$url" || true
+  echo "  [*] downloading: $dest_name"
+  aria2c -q --allow-overwrite=true --auto-file-renaming=false \
+    -o "$dest_name" -d "$dest_dir" "$url" || {
+      echo "  [!] failed to download $dest_name"; return 1;
+    }
 }
 
-if [ -n "$CHECKPOINT_URLS" ]; then
-  IFS=',' read -ra A <<< "$CHECKPOINT_URLS"
-  echo "[*] Downloading checkpoints (direct URLs)…"
-  for u in "${A[@]}"; do dl "$u" "$CKPT_DIR"; done
-fi
+echo "[*] Ensuring required models are present…"
 
-if [ -n "$VAE_URLS" ]; then
-  IFS=',' read -ra A <<< "$VAE_URLS"
-  echo "[*] Downloading VAEs (direct URLs)…"
-  for u in "${A[@]}"; do dl "$u" "$VAE_DIR"; done
-fi
+# 1) WAN 2.2 high/low diffusion models
+dl_as "$WAN22_HIGH_URL" "$DIFF_DIR" "$WAN22_HIGH_NAME"
+dl_as "$WAN22_LOW_URL"  "$DIFF_DIR" "$WAN22_LOW_NAME"
 
-if [ -n "$LORA_URLS" ]; then
-  IFS=',' read -ra A <<< "$LORA_URLS"
-  echo "[*] Downloading LoRAs (direct URLs)…"
-  for u in "${A[@]}"; do dl "$u" "$LORA_DIR"; done
-fi
+# 2) UMT5 text encoder
+dl_as "$UMT5_URL" "$TXT_DIR" "$UMT5_NAME"
 
-if [ -n "$CHECKPOINT_IDS" ]; then
-  IFS=',' read -ra A <<< "$CHECKPOINT_IDS"
-  echo "[*] Downloading checkpoints (Civitai IDs)…"
-  for id in "${A[@]}"; do civitai_dl "$id" "$CKPT_DIR"; done
-fi
+# 3) WAN 2.1 VAE
+dl_as "$WAN21_VAE_URL" "$VAE_DIR" "$WAN21_VAE_NAME"
 
-if [ -n "$VAE_IDS" ]; then
-  IFS=',' read -ra A <<< "$VAE_IDS"
-  echo "[*] Downloading VAEs (Civitai IDs)…"
-  for id in "${A[@]}"; do civitai_dl "$id" "$VAE_DIR"; done
-fi
-
-if [ -n "$LORA_IDS" ]; then
-  IFS=',' read -ra A <<< "$LORA_IDS"
-  echo "[*] Downloading LoRAs (Civitai IDs)…"
-  for id in "${A[@]}"; do civitai_dl "$id" "$LORA_DIR"; done
-fi
-
-echo "[*] Model downloads complete."
+echo "[*] All required models checked."
